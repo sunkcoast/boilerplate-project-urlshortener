@@ -14,7 +14,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Simple file-based storage
 const DB_FILE = path.join(__dirname, 'urls.json');
 
 function loadDB() {
@@ -30,16 +29,13 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
 }
 
-// Serve frontend
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-// POST /api/shorturl — create short URL
 app.post('/api/shorturl', (req, res) => {
   const originalUrl = req.body.url;
 
-  // Validate URL format
   let parsedUrl;
   try {
     parsedUrl = new URL(originalUrl);
@@ -47,29 +43,19 @@ app.post('/api/shorturl', (req, res) => {
     return res.json({ error: 'invalid url' });
   }
 
-  // Only allow http and https
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
     return res.json({ error: 'invalid url' });
   }
 
-  // DNS lookup to verify host exists
   dns.lookup(parsedUrl.hostname, (err) => {
-    if (err) {
-      return res.json({ error: 'invalid url' });
-    }
+    if (err) return res.json({ error: 'invalid url' });
 
     const db = loadDB();
-
-    // Check if URL already exists
     const existing = db.urls.find(u => u.original_url === originalUrl);
     if (existing) {
-      return res.json({
-        original_url: existing.original_url,
-        short_url: existing.short_url
-      });
+      return res.json({ original_url: existing.original_url, short_url: existing.short_url });
     }
 
-    // Create new short URL
     const shortUrl = db.counter;
     db.urls.push({ original_url: originalUrl, short_url: shortUrl });
     db.counter += 1;
@@ -79,27 +65,18 @@ app.post('/api/shorturl', (req, res) => {
   });
 });
 
-// GET /api/shorturl/:short_url — redirect to original URL
 app.get('/api/shorturl/:short_url', (req, res) => {
   const shortUrl = parseInt(req.params.short_url);
-
-  if (isNaN(shortUrl)) {
-    return res.json({ error: 'wrong format' });
-  }
+  if (isNaN(shortUrl)) return res.json({ error: 'wrong format' });
 
   const db = loadDB();
   const entry = db.urls.find(u => u.short_url === shortUrl);
-
-  if (!entry) {
-    return res.json({ error: 'no short url found' });
-  }
+  if (!entry) return res.json({ error: 'no short url found' });
 
   res.redirect(entry.original_url);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log('URL Shortener running on port ' + PORT);
-});
+app.listen(PORT, () => console.log('Running on port ' + PORT));
 
 module.exports = app;
