@@ -1,24 +1,105 @@
-require('dotenv').config();
+'use strict';
+
 const express = require('express');
 const cors = require('cors');
+const dns = require('dns');
+const url = require('url');
+const fs = require('fs');
+const path = require('path');
+
 const app = express();
 
-// Basic Configuration
-const port = process.env.PORT || 3000;
+app.use(cors({ optionsSuccessStatus: 200 }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-app.use(cors());
+// Simple file-based storage
+const DB_FILE = path.join(__dirname, 'urls.json');
 
-app.use('/public', express.static(`${process.cwd()}/public`));
+function loadDB() {
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  return { urls: [], counter: 1 };
+}
 
-app.get('/', function(req, res) {
-  res.sendFile(process.cwd() + '/views/index.html');
+function saveDB(db) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+}
+
+// Serve frontend
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/views/index.html');
 });
 
-// Your first API endpoint
-app.get('/api/hello', function(req, res) {
-  res.json({ greeting: 'hello API' });
+// POST /api/shorturl — create short URL
+app.post('/api/shorturl', (req, res) => {
+  const originalUrl = req.body.url;
+
+  // Validate URL format
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(originalUrl);
+  } catch (e) {
+    return res.json({ error: 'invalid url' });
+  }
+
+  // Only allow http and https
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    return res.json({ error: 'invalid url' });
+  }
+
+  // DNS lookup to verify host exists
+  dns.lookup(parsedUrl.hostname, (err) => {
+    if (err) {
+      return res.json({ error: 'invalid url' });
+    }
+
+    const db = loadDB();
+
+    // Check if URL already exists
+    const existing = db.urls.find(u => u.original_url === originalUrl);
+    if (existing) {
+      return res.json({
+        original_url: existing.original_url,
+        short_url: existing.short_url
+      });
+    }
+
+    // Create new short URL
+    const shortUrl = db.counter;
+    db.urls.push({ original_url: originalUrl, short_url: shortUrl });
+    db.counter += 1;
+    saveDB(db);
+
+    res.json({ original_url: originalUrl, short_url: shortUrl });
+  });
 });
 
-app.listen(port, function() {
-  console.log(`Listening on port ${port}`);
+// GET /api/shorturl/:short_url — redirect to original URL
+app.get('/api/shorturl/:short_url', (req, res) => {
+  const shortUrl = parseInt(req.params.short_url);
+
+  if (isNaN(shortUrl)) {
+    return res.json({ error: 'wrong format' });
+  }
+
+  const db = loadDB();
+  const entry = db.urls.find(u => u.short_url === shortUrl);
+
+  if (!entry) {
+    return res.json({ error: 'no short url found' });
+  }
+
+  res.redirect(entry.original_url);
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log('URL Shortener running on port ' + PORT);
+});
+
+module.exports = app;
